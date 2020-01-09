@@ -1,127 +1,146 @@
 import math as ma
 import numpy as np
+import matplotlib.pyplot as plt
 from scipy.optimize import minimize
+from scipy.interpolate import InterpolatedUnivariateSpline
+import matplotlib.gridspec as gridspec
 from problem_functions import brach_eom as beom
 from utilities import collocation_functions as cf
 
-ns = 5
-m = ns + 1
-p = 6
-q = 1
+"""soln_tol of 1e-4 and ns=15 works well for xf,yf=1.0,0.3"""
+soln_tol = 0.000005
+
+ns = 15 # number of segments
+m = ns + 1 # number of gridpoints
+p = 3 # number of states
+q = 1 # number of control variables
 gamma = p + q
 
-# initialize
-t1 = 0.0
-tf = .4
-hk = (tf - t1) / ns
-t = np.linspace(t1, tf, 100)
-
 # Boundry Conditions / Constraints
-# Initial
 x0 = 0.0
-xd0 = 0.0
-y0 = 0.0
-yd0 = 0.0
-v0 = 0.0
-vd0 = 0.0
-# t0 = 0.0
-
-# Final
 xf = 1.0
-yf = -1.0
+y0 = 0.0
+yf = 0.3
+v0 = 0.0
 
-tf0 = 3.0
+plot_initialation = False
+xo = beom.ramp_initializer(x0, xf, y0, yf, v0, m, plot_initialation)
 
-x = np.linspace(x0, xf, m)
-xd = np.linspace(xd0, 10, m)
-y = np.linspace(y0, yf, m)
-yd = np.linspace(yd0, 10, m)
-v = np.linspace(v0, -10, m)
-vd = np.linspace(yd0, 10, m)
-u = np.ones([m]) * np.tan((yf - y0) / (xf - x0))
-# np.random.uniform(-.05, .05, m)
+hk = xo[-1] / ns
 
-xo = np.concatenate((x, xd, y, yd, v, vd, u, [tf0]), axis=0).tolist()
-
-print(xo)
-print(len(xo))
+print("xo:\n{}".format(xo))
+print("len xo:\n {}".format(len(xo)))
 
 collocation_cons = cf.constraint_list_gen(ns, p, q, cf.dfct_eval, beom.brach_eom_list)
 
-print(len(collocation_cons))
-for i in range(len(collocation_cons)):
-    print(collocation_cons[i])
-
+print("len collocation cons:\n {}".format(len(collocation_cons)))
 
 # constraints
 def c_x0(x):
-    return x0 - x[0 * m]
-
-
-def c_xd0(x):
-    return xd0 - x[1 * m]
+    return x[0 * m] - 0.0
 
 
 def c_y0(x):
-    return y0 - x[2 * m]
-
-
-def c_yd0(x):
-    return yd0 - x[3 * m]
+    return x[1 * m] - 0.0
 
 
 def c_v0(x):
-    return v0 - x[4 * m]
-
-
-def c_vd0(x):
-    return vd0 - x[5 * m]
+    return x[2 * m] - 0.0
 
 
 def c_xf(x):
-    return xf - x[1 * m - 1]
+    return x[1 * m - 1] - xf
 
 
 def c_yf(x):
-    return yf - x[3 * m - 1]
+    return x[2 * m - 1] - yf
 
 
 con1 = {'type': 'eq', 'fun': c_x0}
-con2 = {'type': 'eq', 'fun': c_xd0}
-con3 = {'type': 'eq', 'fun': c_y0}
-con4 = {'type': 'eq', 'fun': c_yd0}
-con5 = {'type': 'eq', 'fun': c_v0}
-con6 = {'type': 'eq', 'fun': c_vd0}
-con7 = {'type': 'eq', 'fun': c_xf}
-con8 = {'type': 'eq', 'fun': c_y0}
+con2 = {'type': 'eq', 'fun': c_y0}
+con3 = {'type': 'eq', 'fun': c_v0}
+con4 = {'type': 'eq', 'fun': c_xf}
+con5 = {'type': 'eq', 'fun': c_yf}
 
-boundry_conditions = [con1, con2, con3, con4, con5, con6, con7, con8]
+boundry_conditions = [con1, con2, con3, con4, con5]
 
 cons_total = collocation_cons + boundry_conditions
 
+print("number of  constraints:\n{}".format(len(cons_total)))
+print("all constraints:\n{}".format(cons_total))
+
+for i in range(len(cons_total)):
+    print("constraint {}\n{}".format(i+1,cons_total[i]))
 
 bound_pos_x = (0.0, xf)
-bound_pos_y = (-10.0, 0.0)
-bound_rate_x = (0.0, 10.0)
-bound_rate_y = (-10.0, 0.0)
-bound_rate = (0.0, 10.0)
-bound_control = (-ma.pi / 2., ma.pi / 2.)
-bound_time = (0.0, 2.0)
-bound_list = [bound_pos_x, bound_rate_x, bound_pos_y, bound_rate_y, bound_rate, bound_rate, bound_control]
+bound_pos_y = (0.0, 3.0)
+bound_rate = (0.0, 6.0)
+bound_control = (0.0, ma.pi)
+bound_time = (0.05, 2.0)
+bound_list = [bound_pos_x, bound_pos_y, bound_rate, bound_control]
 
 bnds = cf.bound_gen(bound_list, ns) + (bound_time,)
 print(len(bnds))
 for i in range(len(bnds)):
     print(bnds[i])
 
+for i in range(len(collocation_cons)):
+    arg = collocation_cons[i]['args']
+    a = (xo,) + arg
+    print("defect {}: {}".format(i, cf.dfct_eval(a[0], a[1], a[2], a[3], a[4], a[5], a[6])))
+
+
 print("solving...")
 solution = minimize(beom.objective_brach, xo, method='SLSQP',\
-                    bounds=bnds, constraints=cons_total)
+                    bounds=bnds, constraints=cons_total, options={"disp":True, "ftol":soln_tol})
 xp = solution.x
-print(solution.nit)
-print(solution.success)
-print(solution.status)
-print(solution.message)
-print(xp)
+
+xs = xp[0:m]
+ys = xp[m:2 * m]
+vs = xp[2 * m:3 * m]
+us = xp[3 * m:4 * m]
+
+print("\nx:\n {}\n".format(xs))
+print("y:\n {}\n".format(ys))
+print("v:\n {}\n".format(vs))
+print("u:\n {}\n".format(us))
 print(len(xp))
 print(beom.objective_brach(xp))
+
+optimal_states, optimal_controls = cf.state_parser(xp, m, p)
+x_opt = optimal_states[0]
+y_opt = optimal_states[1]
+v_opt = optimal_states[2]
+u_opt = optimal_controls[0]
+
+path_opt = InterpolatedUnivariateSpline(x_opt, y_opt, k=2)
+x_fine = np.linspace(0, xf, 400)
+
+
+initial_states, initial_controls = cf.state_parser(xo, m, p)
+x_init = initial_states[0]
+y_init = initial_states[1]
+v_init = initial_states[2]
+u_init = initial_controls[0]
+
+r = beom.cycloid_solver(xf, yf)[0]
+theta = beom.cycloid_solver(xf, yf)[1]
+
+xr = beom.cycloid_cordinates_xy(r, theta, 100)[0]
+yr = beom.cycloid_cordinates_xy(r, theta, 100)[1]
+
+print "\n\n<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
+print "Travel Time on Curve Found vis Direct Collocation: ",beom.objective_brach(xp)
+print "Optimal Travel Time Via Brachistocrone: ", beom.cycloid_time(xf, yf)
+print "Solution via Direct Collocation is wihin {}% of Analytic Optimum.".format((1.-beom.objective_brach(xp)/beom.cycloid_time(xf, yf))*100.)
+print "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
+
+fig = plt.figure()
+
+plt.plot(x_init, -1.0*np.array(y_init), color="teal", linewidth=4.0, zorder=1, label="Initial Guess")
+# plt.plot(x_opt, -1.0*np.array(y_opt), color="indianred", linewidth=4.0, zorder=3, linestyle="--", label="Optimal Solution via Direct Collocation")
+plt.plot(x_fine, -1.0*np.array(path_opt(x_fine)), color="indianred", linewidth=3, linestyle=":", zorder=10, label="Optimal Solution via Direct Collocation")
+plt.plot(xr, -1.0*np.array(yr), color="darkviolet", zorder=2, linewidth=4.0, label="Analyitic Optimal Solution")
+plt.legend(fontsize='xx-large')
+plt.grid()
+plt.show()
